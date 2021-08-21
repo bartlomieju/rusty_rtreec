@@ -1,1 +1,1 @@
-Rust bindings for [btree.c](https://github.com/tidwall/btree.c)
+Rust bindings for [rtree.c](https://github.com/tidwall/rtree.c)

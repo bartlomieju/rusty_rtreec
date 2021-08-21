@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::mem::transmute;
 
-unsafe extern "C" fn iter_trampoline<T, I, const N: u32>(
+unsafe extern "C" fn iter_trampoline<T, I, const N: i32>(
     rect: *const c_double,
     item: *const c_void,
     user_data: *mut c_void,
@@ -19,43 +19,40 @@ where
     I: FnMut(&[f64], &T) -> bool,
 {
     let item = &*(item as *const T);
-    eprintln!("trampoline called");
     let rect_slice = std::slice::from_raw_parts(rect, N.try_into().unwrap());
     let iter_fn = transmute::<*mut c_void, *mut I>(user_data);
     (*iter_fn)(rect_slice, item)
 }
 
 #[repr(C)]
-pub struct RTreeC<T, const N: u32> {
+pub struct RTreeC<T, const N: i32> {
     rtree: *mut rtree,
     _phantom: PhantomData<T>,
 }
 
-unsafe impl<T, const N: u32> Send for RTreeC<T, N> {}
-unsafe impl<T, const N: u32> Sync for RTreeC<T, N> {}
+unsafe impl<T, const N: i32> Send for RTreeC<T, N> {}
+unsafe impl<T, const N: i32> Sync for RTreeC<T, N> {}
 
-impl<T, const N: u32> RTreeC<T, N> {
-    pub fn new() -> Self {
-        let p = unsafe { rtree_new(size_of::<T>().try_into().unwrap(), N.try_into().unwrap()) };
+impl<T, const N: i32> Default for RTreeC<T, N> {
+    fn default() -> Self {
+        let p = unsafe { rtree_new(size_of::<T>().try_into().unwrap(), N) };
         Self {
             rtree: p,
             _phantom: PhantomData,
         }
     }
+}
 
+impl<T, const N: i32> RTreeC<T, N> {
     pub fn count(&self) -> u64 {
-        #[allow(clippy::useless_conversion)]
-        unsafe { rtree_count(self.rtree) }.into()
+        unsafe { rtree_count(self.rtree) }
     }
 
     /// Resturns true if the item was deleted or false if item was not found.
     pub fn delete(&mut self, mut rect: Vec<f64>, item: &T) -> bool {
         let rect_ptr = rect.as_mut_ptr();
         let item_ptr: *const c_void = item as *const _ as *const c_void;
-        let result = unsafe { rtree_delete(self.rtree, rect_ptr, item_ptr) };
-        std::mem::forget(rect);
-        std::mem::forget(item);
-        result
+        unsafe { rtree_delete(self.rtree, rect_ptr, item_ptr) }
     }
 
     // rtree_insert inserts an item into the rtree. This operation performs a copy
@@ -68,10 +65,7 @@ impl<T, const N: u32> RTreeC<T, N> {
     pub fn insert(&mut self, mut rect: Vec<f64>, item: &T) -> bool {
         let rect_ptr = rect.as_mut_ptr();
         let item_ptr: *const c_void = item as *const _ as *const c_void;
-        let result = unsafe { rtree_insert(self.rtree, rect_ptr, item_ptr) };
-        std::mem::forget(rect);
-        std::mem::forget(item);
-        result
+        unsafe { rtree_insert(self.rtree, rect_ptr, item_ptr) }
     }
 
     pub fn search<I>(&self, mut rect: Vec<f64>, iter_fn: I) -> bool
@@ -79,14 +73,13 @@ impl<T, const N: u32> RTreeC<T, N> {
         I: FnMut(&[f64], &T) -> bool,
     {
         let rect_ptr = rect.as_mut_ptr();
-        std::mem::forget(rect);
         let mut iter_fn = Box::new(iter_fn);
         let user_data = unsafe { transmute::<*mut I, *mut c_void>(&mut *iter_fn) };
         unsafe { rtree_search(self.rtree, rect_ptr, iter_trampoline::<T, I, N>, user_data) }
     }
 }
 
-impl<T, const N: u32> Drop for RTreeC<T, N> {
+impl<T, const N: i32> Drop for RTreeC<T, N> {
     fn drop(&mut self) {
         unsafe { rtree_free(self.rtree) }
     }
@@ -105,7 +98,7 @@ mod tests {
 
     #[test]
     fn rtreec_new() {
-        let mut rtree = RTreeC::<City, 2>::new();
+        let mut rtree = RTreeC::<City, 2>::default();
         assert_eq!(rtree.count(), 0);
 
         let phx = City {
@@ -139,7 +132,7 @@ mod tests {
             lon: 134.700,
         };
 
-        rtree.insert(vec![phx.lon, phx.lat, phx.lon, phx.lat], &phx.clone());
+        rtree.insert(vec![phx.lon, phx.lat, phx.lon, phx.lat], &phx);
         rtree.insert(vec![enn.lon, enn.lat, enn.lon, enn.lat], &enn);
         rtree.insert(vec![pra.lon, pra.lat, pra.lon, pra.lat], &pra);
         rtree.insert(vec![tai.lon, tai.lat, tai.lon, tai.lat], &tai);
@@ -150,7 +143,6 @@ mod tests {
 
         let mut northwestern_cities = vec![];
         rtree.search(vec![-180.0, 0.0, 0.0, 90.0], |_rect, item| {
-            eprintln!("iter! {:?} {:?}", _rect, item);
             northwestern_cities.push(item.name.to_string());
             true
         });
